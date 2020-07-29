@@ -1,7 +1,9 @@
-import psutil
+# import psutil
 import json
 import inquirer
 import socket
+# import netifaces
+import scapy.all as scapy
 
 # Print prettified json
 def jprint(args):
@@ -14,13 +16,20 @@ def pprint(args):
 class Pysturb:
     def __init__(self):
         self.iface_list = self.get_iface_list()
-        self.iface_selected = 'lo'
-        self.ip_addr = None
-        self.ipv6_addr = None
-        self.mac_addr = None
+        # self.iface = None
+        # self.ip_addr = None
+        # # self.ipv6_addr = None
+        # self.gateway = None
+        # # self.gateway_v6 = None
+        # self.mac_addr = None
+        # self.targets = None
 
     # Display interface selection menu
     def prompt_select_iface(self):
+        if not self.iface_list:
+            print("No available network interface found!")
+            return
+
         questions = [
             inquirer.List(
                 "iface",
@@ -28,23 +37,23 @@ class Pysturb:
                 choices=self.iface_list
             )
         ]
-        ans = inquirer.prompt(questions)['iface']
-        self.iface_selected = ans
-        self.ip_addr = self.get_addr(ans)
-        self.ipv6_addr = self.get_addr(ans, t_addr='IPv6') 
-        self.mac_addr = self.get_addr(ans, t_addr='MAC')
+        iface = inquirer.prompt(questions)['iface']
+        self.iface = iface
+        self.ip_addr = scapy.get_if_addr(iface)
+        self.mac_addr = scapy.get_if_hwaddr(iface)
+        self.gateway = scapy.conf.route.route('0.0.0.0')[2]
+        self.targets = self.scan_targets()
 
     # Get available interfaces
     def get_iface_list(self):
-        return [k for k in psutil.net_if_addrs()]
+        return [i for i in scapy.get_if_list() if i != 'lo']
 
-    # Get ip addres from selected interfaces
-    def get_addr(self, iface='lo', t_addr='IPv4'):
-        af_map = {socket.AF_INET: 'IPv4', socket.AF_INET6: 'IPv6', psutil.AF_LINK: 'MAC'}
-        addrs = dict()
-        for addr in psutil.net_if_addrs()[iface]:
-            addrs[af_map.get(addr.family)] = addr.address
-        return addrs.get(t_addr)
+    def scan_targets(self):
+        #sementara:v
+        ips=self.ip_addr + '/24'
+        request = scapy.Ether(dst='ff:ff:ff:ff:ff:ff')/scapy.ARP(pdst=ips)
+        ans, unans = scapy.srp(request, iface=self.iface, timeout=1, verbose=0)
+        return [recv[scapy.ARP].psrc for send, recv in ans if recv]
 
 worker = Pysturb()
 worker.prompt_select_iface()
