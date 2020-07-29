@@ -7,7 +7,8 @@ import scapy.all as scapy
 import time
 import signal
 import sys
-import inspect 
+import inspect
+import ipaddress
 
 
 # Print prettified json
@@ -93,7 +94,7 @@ class PySturb:
             inquirer.List(
                 "scan_method",
                 message="Select scanning method",
-                choices=["flood", "normal"]
+                choices=["Network sweep", "ARP scan"]
             )
         ]
         self.scan_method = inquirer.prompt(questions)['scan_method']
@@ -103,28 +104,38 @@ class PySturb:
         return [i for i in netifaces.interfaces() if i != 'lo']
 
     # Scan all hosts in the network regardless if they're exist or not (slow)
-    def flood_scan(self):
-        print(' [Flood Scan] Collecting targets...  (this perform may be slow)\n')
-        total_host = 2**(32-self.cidr)-2
+    def network_sweep(self):
+        print(' [Network Sweep] Collecting targets...  (this perform may be slow)\n')
         hosts = list()
         collected = 0
+        network = self.addr.ip + '/' + str(self.cidr)
+        # Get all possible ip address in network range
+        ips = [str(x) for x in ipaddress.IPv4Network(network, strict=False)]
+        # Remove network and broadcast ip from the list
+        ips.pop(0)
+        ips.pop(-1)
+
         self.watch_interrupt_signal()
-        for i in range(total_host):
-            if i == 0: continue
+        for ip in ips:
             if self.interrupted: break
-            ip = self.gateway.ip.split('.')[:3]
-            ip.append(str(i+1))
-            ip = '.'.join(ip)
             mac = scapy.getmacbyip(ip)
             target = Address(ip, mac)
             hosts.append(target)
-            sys.stdout.write("\r   Progress:{:5.0f}%".format(collected/total_host*100 if collected != 0 else 0))
+            sys.stdout.write("\r   Progress:{:5.0f}%".format(collected/len(ips)*100))
             sys.stdout.flush()
             collected += 1
         self.targets = hosts
 
-    def normal_scan(self):
-        print(' [Normal Scan] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
+    def ping_sweep_test(self):
+        ips=self.addr.ip + '/' + str(self.cidr)
+        addresses=[str(x) for x in ipaddress.IPv4Network(ips, strict=False)]
+        addresses.pop(0)
+        addresses.pop(-1)
+        for ip in addresses:
+            print(ip)
+
+    def arp_scan(self):
+        print(' [ARP Scan] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
         ips=self.addr.ip + '/' + str(self.cidr)
         ret = []
         self.watch_interrupt_signal()
@@ -152,10 +163,10 @@ class PySturb:
 
     def scan_targets(self):
         print(' [*] Please wait...')
-        if self.scan_method == "flood":
-            self.flood_scan()
-        elif self.scan_method == "normal":
-            self.normal_scan()
+        if self.scan_method == "Network sweep":
+            self.network_sweep()
+        elif self.scan_method == "ARP scan":
+            self.arp_scan()
 
 
     # Send forged arp response
