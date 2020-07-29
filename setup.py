@@ -6,7 +6,9 @@ import netifaces
 import scapy.all as scapy
 import time
 import signal
+import sys
 import inspect 
+
 
 # Print prettified json
 def jprint(args):
@@ -93,27 +95,30 @@ class PySturb:
         total_host = 2**(32-self.cidr)-2
         hosts = list()
         collected = 0
-        self.watch_interupt_signal()
+        self.watch_interrupt_signal()
+        print("BADANGGGG, PUCEK LAH")
         for i in range(total_host):
             if i == 0: continue
-            if self.interupted: break
+            if self.interrupted: break
             ip = self.gateway.ip.split('.')[:3]
             ip.append(str(i+1))
             ip = '.'.join(ip)
             mac = scapy.getmacbyip(ip)
+            if mac == None: continue
             target = Address(ip, mac)
             hosts.append(target)
-            print("Progress: {:1.0f}%".format(collected/total_host*100 if collected != 0 else 0))
+            sys.stdout.write("\r   Progress:{:5.0f}%".format(collected/total_host*100 if collected != 0 else 0))
+            sys.stdout.flush()
             collected += 1
         self.targets = hosts
 
-    def watch_interupt_signal(self):
+    def watch_interrupt_signal(self):
         global original_sigint
-        self.interupted = False
+        self.interrupted = False
         original_sigint = signal.getsignal(signal.SIGINT)
         def handler(sig, frame):
             global original_sigint
-            self.interupted = True
+            self.interrupted = True
             signal.signal(signal.SIGINT, original_sigint)
         signal.signal(signal.SIGINT, handler)
 
@@ -121,8 +126,8 @@ class PySturb:
         print(' [*] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
         ips=self.addr.ip + '/' + str(self.cidr)
         ret = []
-        self.watch_interupt_signal()
-        while not self.interupted:
+        self.watch_interrupt_signal()
+        while not self.interrupted:
             request = scapy.Ether(dst='ff:ff:ff:ff:ff:ff')/scapy.ARP(pdst=ips)
             ans, unans = scapy.srp(request, iface=self.iface, timeout=1, verbose=0)
             for send, recv in ans:
