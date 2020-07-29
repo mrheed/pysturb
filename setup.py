@@ -9,7 +9,8 @@ import signal
 import sys
 import inspect
 import ipaddress
-
+import threading
+from queue import Queue
 
 # Print prettified json
 def jprint(args):
@@ -45,6 +46,7 @@ class PySturb:
         self.addr = None
         self.gateway = None
         self.targets = None
+        self.interrupted = False
 
     # Display interface selection menu
     def prompt_select_iface(self):
@@ -107,32 +109,54 @@ class PySturb:
     def network_sweep(self):
         print(' [Network Sweep] Collecting targets...  (this perform may be slow)\n')
         hosts = list()
+        global collected
         collected = 0
         network = self.addr.ip + '/' + str(self.cidr)
         # Get all possible ip address in network range
         ips = [str(x) for x in ipaddress.IPv4Network(network, strict=False)]
-        # Remove network and broadcast ip from the list
+        # Remove network, broadcast, and gateway ip from the list
         ips.pop(0)
         ips.pop(-1)
+        ips.remove(self.gateway.ip)
 
-        self.watch_interrupt_signal()
-        for ip in ips:
-            if self.interrupted: break
-            mac = scapy.getmacbyip(ip)
-            target = Address(ip, mac)
-            hosts.append(target)
-            sys.stdout.write("\r   Progress: {} of {}\t({:.1f}%)".format(collected,len(ips),collected/len(ips)*100))
-            sys.stdout.flush()
+        # Create new thread queue
+        q = Queue()
+
+        # Create lock for progress and collected 
+        print_lock = threading.Lock()
+
+        # Worker method
+        def scanner(ip):
+            global collected
+
+            print_lock.acquire()
             collected += 1
-        self.targets = hosts
+            sys.stdout.write("\r   Progress: {} of {}\t({:.1f}%)".format(collected, len(ips), collected/len(ips)*100))
+            sys.stdout.flush()
+            print_lock.release()
 
-    def ping_sweep_test(self):
-        ips=self.addr.ip + '/' + str(self.cidr)
-        addresses=[str(x) for x in ipaddress.IPv4Network(ips, strict=False)]
-        addresses.pop(0)
-        addresses.pop(-1)
-        for ip in addresses:
-            print(ip)
+            mac = scapy.getmacbyip(ip)
+            if mac:
+                hosts.append(Address(ip, mac))
+
+        def threader():
+            while True:
+                ip = q.get()
+                scanner(ip)
+                q.task_done()
+
+        # Create thread pool
+        for x in range(100):
+            thread = threading.Thread(target=threader)
+            thread.daemon = True
+            thread.start()
+
+        for ip in ips:
+                q.put(ip)
+
+        q.join()
+        
+        self.targets = hosts
 
     def arp_scan(self):
         print(' [ARP Scan] Collecting targets...  (Press CTRL+C to begin ARP poisoning)\n')
@@ -205,10 +229,10 @@ if __name__ == '__main__':
     worker = PySturb()
     worker.prompt_select_iface()
 
-#try:
- #   print('\n [*] Begin ARP cache poisoning...\n')
-  #  worker.begin_arp_cache_poisoning()
-#except KeyboardInterrupt:
- #   print('\n [*] Restoring network...\n')
-  #  worker.restore()
+# try:
+#    print('\n [*] Begin ARP cache poisoning...\n')
+#    worker.begin_arp_cache_poisoning()
+# except KeyboardInterrupt:
+#    print('\n [*] Restoring network...\n')
+#    worker.restore()
 #pprint(worker)
