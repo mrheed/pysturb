@@ -16,13 +16,10 @@ def serialize_object(obj):
     instance_attributes = dict()
     serialized = vars(obj)
     for k in serialized:
-        attribute = dict()
         if "<class '__main__" in str(type((serialized[k]))): 
             ser = serialize_object(serialized[k])
-            print(ser)
-            attribute[k] = ser
-        else: attribute[k] = serialized[k]
-        instance_attributes[k] = attribute
+            instance_attributes[k] = ser
+        else: instance_attributes[k] = serialized[k]
     return instance_attributes
 
 
@@ -85,41 +82,47 @@ class PySturb:
         self.gateway = Address(gw_ip, gw_mac)
 
         # Scan targets
-#        self.targets = self.scan_targets()
+        #self.targets = self.scan_targets()
 
     # Get available interfaces
     def get_iface_list(self):
         return [i for i in netifaces.interfaces() if i != 'lo']
 
-    # Attack all hosts in the network regardless if they're exist or not
-    def flood_attack(self):
+    # Attack all hosts in the network regardless if they're exist or not (slow)
+    def flood_scan(self):
         total_host = 2**(32-self.cidr)-2
         hosts = list()
+        collected = 0
+        self.watch_interupt_signal()
         for i in range(total_host):
             if i == 0: continue
+            if self.interupted: break
             ip = self.gateway.ip.split('.')[:3]
             ip.append(str(i+1))
             ip = '.'.join(ip)
-            mac = ''
+            mac = scapy.getmacbyip(ip)
             target = Address(ip, mac)
             hosts.append(target)
-        pprint(self)
+            print("Progress: {:1.0f}%".format(collected/total_host*100 if collected != 0 else 0))
+            collected += 1
+        self.targets = hosts
+
+    def watch_interupt_signal(self):
+        global original_sigint
+        self.interupted = False
+        original_sigint = signal.getsignal(signal.SIGINT)
+        def handler(sig, frame):
+            global original_sigint
+            self.interupted = True
+            signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGINT, handler)
 
     def scan_targets(self):
         print(' [*] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
         ips=self.addr.ip + '/' + str(self.cidr)
         ret = []
-        global interrupt_loop
-        global original_sigint
-        interrupt_loop = False
-        original_sigint = signal.getsignal(signal.SIGINT)
-        def handler(sig, frame):
-            global interrupt_loop
-            global original_sigint
-            interrupt_loop = True
-            signal.signal(signal.SIGINT, original_sigint)
-        signal.signal(signal.SIGINT, handler)
-        while not interrupt_loop:
+        self.watch_interupt_signal()
+        while not self.interupted:
             request = scapy.Ether(dst='ff:ff:ff:ff:ff:ff')/scapy.ARP(pdst=ips)
             ans, unans = scapy.srp(request, iface=self.iface, timeout=1, verbose=0)
             for send, recv in ans:
@@ -167,7 +170,7 @@ class PySturb:
 if __name__ == '__main__':
     worker = PySturb()
     worker.prompt_select_iface()
-    worker.flood_attack()
+    worker.flood_scan()
 
 #try:
  #   print('\n [*] Begin ARP cache poisoning...\n')
