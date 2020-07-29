@@ -96,10 +96,12 @@ class PySturb:
         hosts = list()
         collected = 0
         self.watch_interrupt_signal()
-        print("BADANGGGG, PUCEK LAH")
+        # print("BADANGGGG, PUCEK LAH")
         for i in range(total_host):
             if i == 0: continue
             if self.interrupted: break
+            sys.stdout.write("\r   Progress:{:5.0f}%".format(i/total_host*100.0))
+            sys.stdout.flush()
             ip = self.gateway.ip.split('.')[:3]
             ip.append(str(i+1))
             ip = '.'.join(ip)
@@ -107,8 +109,6 @@ class PySturb:
             if mac == None: continue
             target = Address(ip, mac)
             hosts.append(target)
-            sys.stdout.write("\r   Progress:{:5.0f}%".format(collected/total_host*100 if collected != 0 else 0))
-            sys.stdout.flush()
             collected += 1
         self.targets = hosts
 
