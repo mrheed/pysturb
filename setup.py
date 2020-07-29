@@ -2,6 +2,7 @@ import psutil
 import json
 import inquirer
 import socket
+import scapy
 
 # Print prettified json
 def jprint(args):
@@ -47,6 +48,5 @@ class Pysturb:
         return addrs.get(t_addr)
 
 worker = Pysturb()
-worker.prompt_select_iface()
-pprint(worker)
+#worker.prompt_select_iface()
 
