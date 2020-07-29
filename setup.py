@@ -96,7 +96,6 @@ class PySturb:
         hosts = list()
         collected = 0
         self.watch_interrupt_signal()
-        # print("BADANGGGG, PUCEK LAH")
         for i in range(total_host):
             if i == 0: continue
             if self.interrupted: break
