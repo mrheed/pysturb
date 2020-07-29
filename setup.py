@@ -121,7 +121,7 @@ class PySturb:
             mac = scapy.getmacbyip(ip)
             target = Address(ip, mac)
             hosts.append(target)
-            sys.stdout.write("\r   Progress:{:5.0f}%".format(collected/len(ips)*100))
+            sys.stdout.write("\r   Progress: {} of {}\t({:.1f}%)".format(collected,len(ips),collected/len(ips)*100))
             sys.stdout.flush()
             collected += 1
         self.targets = hosts
@@ -135,7 +135,7 @@ class PySturb:
             print(ip)
 
     def arp_scan(self):
-        print(' [ARP Scan] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
+        print(' [ARP Scan] Collecting targets...  (Press CTRL+C to begin ARP poisoning)\n')
         ips=self.addr.ip + '/' + str(self.cidr)
         ret = []
         self.watch_interrupt_signal()
