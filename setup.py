@@ -2,7 +2,7 @@
 import json
 import inquirer
 import socket
-# import netifaces
+import netifaces
 import scapy.all as scapy
 
 # Print prettified json
@@ -16,13 +16,11 @@ def pprint(args):
 class Pysturb:
     def __init__(self):
         self.iface_list = self.get_iface_list()
-        # self.iface = None
-        # self.ip_addr = None
-        # # self.ipv6_addr = None
-        # self.gateway = None
-        # # self.gateway_v6 = None
-        # self.mac_addr = None
-        # self.targets = None
+        self.iface = None
+        self.ip_addr = None
+        self.gateway = None
+        self.mac_addr = None
+        self.targets = None
 
     # Display interface selection menu
     def prompt_select_iface(self):
@@ -38,19 +36,34 @@ class Pysturb:
             )
         ]
         iface = inquirer.prompt(questions)['iface']
+        
+        # Assign interface to global variable
         self.iface = iface
-        self.ip_addr = scapy.get_if_addr(iface)
-        self.mac_addr = scapy.get_if_hwaddr(iface)
-        self.gateway = scapy.conf.route.route('0.0.0.0')[2]
+        
+        # Get interface's addresses
+        addrs = netifaces.ifaddresses(iface)
+
+        # The interface seems not connected to any network, aborting...
+        if not netifaces.AF_INET in addrs and not netifaces.AF_INET6 in addrs:
+            return
+
+        # Assign addresses to global variable
+        self.ip_addr = addrs[netifaces.AF_INET][0].get('addr')
+        self.mac_addr = addrs[netifaces.AF_LINK][0].get('addr')
+        netmask = addrs[netifaces.AF_INET][0].get('netmask')
+        self.cidr = sum(bin(int(x)).count('1') for x in netmask.split('.'))
+        gateways = netifaces.gateways()[netifaces.AF_INET]
+        self.gateway = [x[0] for x in gateways if x[1] == iface][0]
+
+        # Scan targets
         self.targets = self.scan_targets()
 
     # Get available interfaces
     def get_iface_list(self):
-        return [i for i in scapy.get_if_list() if i != 'lo']
+        return [i for i in netifaces.interfaces() if i != 'lo']
 
     def scan_targets(self):
-        #sementara:v
-        ips=self.ip_addr + '/24'
+        ips=self.ip_addr + '/' + str(self.cidr)
         request = scapy.Ether(dst='ff:ff:ff:ff:ff:ff')/scapy.ARP(pdst=ips)
         ans, unans = scapy.srp(request, iface=self.iface, timeout=1, verbose=0)
         return [recv[scapy.ARP].psrc for send, recv in ans if recv]
