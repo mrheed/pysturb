@@ -83,20 +83,32 @@ class PySturb:
         gw_mac = scapy.getmacbyip(gw_ip)
         self.gateway = Address(gw_ip, gw_mac)
 
+        self.prompt_scan_method()
+
         # Scan targets
-        #self.targets = self.scan_targets()
+        self.scan_targets()
+
+    def prompt_scan_method(self):
+        questions = [
+            inquirer.List(
+                "scan_method",
+                message="Select scanning method",
+                choices=["flood", "normal"]
+            )
+        ]
+        self.scan_method = inquirer.prompt(questions)['scan_method']
 
     # Get available interfaces
     def get_iface_list(self):
         return [i for i in netifaces.interfaces() if i != 'lo']
 
-    # Attack all hosts in the network regardless if they're exist or not (slow)
+    # Scan all hosts in the network regardless if they're exist or not (slow)
     def flood_scan(self):
+        print(' [Flood Scan] Collecting targets...  (this perform may be slow)\n')
         total_host = 2**(32-self.cidr)-2
         hosts = list()
         collected = 0
         self.watch_interrupt_signal()
-        print("BADANGGGG, PUCEK LAH")
         for i in range(total_host):
             if i == 0: continue
             if self.interrupted: break
@@ -104,7 +116,6 @@ class PySturb:
             ip.append(str(i+1))
             ip = '.'.join(ip)
             mac = scapy.getmacbyip(ip)
-            if mac == None: continue
             target = Address(ip, mac)
             hosts.append(target)
             sys.stdout.write("\r   Progress:{:5.0f}%".format(collected/total_host*100 if collected != 0 else 0))
@@ -112,18 +123,8 @@ class PySturb:
             collected += 1
         self.targets = hosts
 
-    def watch_interrupt_signal(self):
-        global original_sigint
-        self.interrupted = False
-        original_sigint = signal.getsignal(signal.SIGINT)
-        def handler(sig, frame):
-            global original_sigint
-            self.interrupted = True
-            signal.signal(signal.SIGINT, original_sigint)
-        signal.signal(signal.SIGINT, handler)
-
-    def scan_targets(self):
-        print(' [*] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
+    def normal_scan(self):
+        print(' [Normal Scan] Collecting targets...  (Press CTRL+C to begin arp forgery)\n')
         ips=self.addr.ip + '/' + str(self.cidr)
         ret = []
         self.watch_interrupt_signal()
@@ -138,7 +139,24 @@ class PySturb:
                         ret.append(Address(ip, mac))
                         print('\t[{}] MAC: {}\tIP: {}'.format(len(ret), mac, ip))
             time.sleep(0.5)
-        return ret
+
+    def watch_interrupt_signal(self):
+        global original_sigint
+        self.interrupted = False
+        original_sigint = signal.getsignal(signal.SIGINT)
+        def handler(sig, frame):
+            global original_sigint
+            self.interrupted = True
+            signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGINT, handler)
+
+    def scan_targets(self):
+        print(' [*] Please wait...')
+        if self.scan_method == "flood":
+            self.flood_scan()
+        elif self.scan_method == "normal":
+            self.normal_scan()
+
 
     # Send forged arp response
     def arp_spoof(self, target, host, verbose=True):
@@ -175,7 +193,6 @@ class PySturb:
 if __name__ == '__main__':
     worker = PySturb()
     worker.prompt_select_iface()
-    worker.flood_scan()
 
 #try:
  #   print('\n [*] Begin ARP cache poisoning...\n')
